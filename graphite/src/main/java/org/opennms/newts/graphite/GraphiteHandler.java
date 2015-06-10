@@ -23,6 +23,7 @@ import io.netty.channel.SimpleChannelInboundHandler;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -43,6 +44,7 @@ import com.google.common.base.Optional;
 import com.google.common.base.Splitter;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Sets;
 
 public class GraphiteHandler extends SimpleChannelInboundHandler<String> {
 
@@ -56,6 +58,7 @@ public class GraphiteHandler extends SimpleChannelInboundHandler<String> {
 
     private List<String> m_lines;
     private AtomicInteger m_enQueued = new AtomicInteger(0);
+    private Set<String> m_seenRoots = Sets.newHashSet();
 
     public GraphiteHandler(SampleRepository repository, GraphiteInitializer parent) {
         BlockingQueue<Runnable> queue = new LinkedBlockingQueue<Runnable>();
@@ -91,16 +94,31 @@ public class GraphiteHandler extends SimpleChannelInboundHandler<String> {
                 @Override
                 public void run() {
                     List<Sample> samples = Lists.newArrayList();
+                    Set<String> roots = Sets.newHashSet();
                     for (String line : batch) {
                         try {
-                            samples.add(parseSample(line));
+                            Sample sample = parseSample(line);
+                            roots.add(sample.getResource().getAttributes().get().get(index(0)));
+                            samples.add(sample);
                         }
                         catch (Exception e) {
                             m_parent.protocolErrorsInc();
                         }
                     }
+
+                    roots.removeAll(m_seenRoots);
+
+                    // Generate bogus samples to seed search index (see: http://issues.opennms.org/browse/NEWTS-57)
+                    Map<String, String> rootAttrs = Maps.newHashMap();
+                    rootAttrs.put("_tree", index(0));
+                    Timestamp now = Timestamp.now();
+                    for (String root : roots) {
+                        samples.add(sample(now, new Resource(root, Optional.of(rootAttrs)), "bogus", Double.NaN));
+                    }
+
                     try {
                         m_repository.insert(samples);
+                        m_seenRoots.addAll(roots);
                     }
                     catch (Exception e) {
                         LOG.warn("Unable to commit batch of {} samples ({})", samples.size(), e.getMessage());
@@ -109,7 +127,6 @@ public class GraphiteHandler extends SimpleChannelInboundHandler<String> {
                 }
             });
         }
-
     }
 
     private static final Splitter s_lineTokenizer = Splitter.on(CharMatcher.WHITESPACE).limit(3).trimResults();

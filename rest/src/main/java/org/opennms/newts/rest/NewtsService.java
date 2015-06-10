@@ -25,6 +25,7 @@ import io.dropwizard.setup.Environment;
 import java.io.IOException;
 import java.net.URL;
 import java.util.EnumSet;
+import java.util.concurrent.TimeUnit;
 
 import javax.servlet.DispatcherType;
 import javax.servlet.Filter;
@@ -44,7 +45,8 @@ import org.opennms.newts.graphite.GraphiteListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.codahale.metrics.JmxReporter;
+import com.codahale.metrics.ConsoleReporter;
+//import com.codahale.metrics.JmxReporter;
 import com.codahale.metrics.MetricRegistry;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
@@ -83,7 +85,8 @@ public class NewtsService extends Application<NewtsConfig> {
         MetricRegistry metricRegistry = injector.getInstance(MetricRegistry.class);
 
         // Create/start a JMX reporter for our MetricRegistry
-        final JmxReporter reporter = JmxReporter.forRegistry(metricRegistry).inDomain("newts").build();
+        //final JmxReporter reporter = JmxReporter.forRegistry(metricRegistry).inDomain("newts").build();
+        final ConsoleReporter reporter = ConsoleReporter.forRegistry(metricRegistry).outputTo(System.err).build();
 
         // Create (and start if so configured), a Graphite line-protocol listener
         final GraphiteListenerThread listener = new GraphiteListenerThread(injector.getInstance(GraphiteListener.class));
@@ -96,7 +99,7 @@ public class NewtsService extends Application<NewtsConfig> {
 
             @Override
             public void start() throws Exception {
-                reporter.start();
+                reporter.start(5, TimeUnit.SECONDS);
                 if (config.getGraphiteConfig().isEnabled()) {
                     listener.start();
                 }
